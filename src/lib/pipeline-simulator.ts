@@ -1,14 +1,12 @@
-import type { CycleSnapshot, PipelineInstruction, StageContent } from "./pipeline-types"
+import type {
+  CycleSnapshot,
+  ParsedInstruction,
+  PipelineStage,
+  PipelineStageData,
+} from "./pipeline-types"
+import { STAGE_ORDER } from "./pipeline-types"
 
-const STAGE_ORDER: Array<keyof Omit<CycleSnapshot, "cycle">> = [
-  "IF",
-  "ID/RF",
-  "EX",
-  "MEM",
-  "WB",
-]
-
-function createEmptyState(): Record<string, StageContent | null> {
+function createEmptyState(): PipelineStageData {
   return {
     IF: null,
     "ID/RF": null,
@@ -18,13 +16,68 @@ function createEmptyState(): Record<string, StageContent | null> {
   }
 }
 
+/** Registers this instruction reads (for RAW hazard check) */
+function getRegistersRead(inst: ParsedInstruction): number[] {
+  const regs: number[] = []
+  if (inst.rs !== null) regs.push(inst.rs)
+  if (inst.rt !== null) regs.push(inst.rt)
+  return regs
+}
+
+/** Register this instruction writes, or null if none */
+function getRegisterWritten(inst: ParsedInstruction): number | null {
+  // R-type: rd; I-type (addi, lw): rt; sw: writes nothing
+  if (inst.rd !== null) return inst.rd
+  if (inst.opcode === "addi" || inst.opcode === "addiu" || inst.opcode === "lw")
+    return inst.rt
+  return null
+}
+
+/**
+ * Checks if the consumer instruction reads from registers that are output by an earlier instruction (further in the pipeline)
+ * @param consumer - The instruction that is consuming the register
+ * @param consumerIndex - The index of the consumer instruction
+ * @param state - The current state of the pipeline
+ * @param instructions - The instructions to simulate
+ * @param downstreamStages - The stages that are downstream of the consumer
+ * @returns True if the consumer has an unresolved dependency
+ */
+function hasUnresolvedDependency(
+  consumer: ParsedInstruction,
+  consumerIndex: number,
+  nextPipelineState: PipelineStageData,
+  instructions: ParsedInstruction[],
+  downstreamStages: PipelineStage[]
+): boolean {
+  const readRegs = getRegistersRead(consumer)
+  if (readRegs.length === 0) return false
+
+  for (const stage of downstreamStages) {
+    const stageContent = nextPipelineState[stage]
+    if (stageContent?.type !== "instruction") continue
+
+    const producerIndex = stageContent.index
+    if (producerIndex >= consumerIndex) continue
+
+    const producer = instructions[producerIndex]
+    const writtenReg = getRegisterWritten(producer)
+    if (writtenReg === null) continue
+
+    if (readRegs.includes(writtenReg)) return true
+  }
+
+  return false
+}
+
 /**
  * Simulates pipeline execution and produces cycle snapshots.
- * Dummy logic: ideal pipeline with one hardcoded stall at cycle 3
- * (inst 1 stalls in ID when inst 0 is in EX - RAW hazard).
+ * Iterates through pipeline stages in reverse order. If an instruction has a dependency on
+ * an earlier instruction (later in the pipeline), then it is stalled. Otherwise, it is advanced.
+ * @param instructions - The instructions to simulate
+ * @returns The cycle snapshots
  */
 export function simulate(
-  instructions: PipelineInstruction[]
+  instructions: ParsedInstruction[]
 ): CycleSnapshot[] {
   const snapshots: CycleSnapshot[] = []
   const count = instructions.length
@@ -38,70 +91,68 @@ export function simulate(
   while (true) {
     const next = createEmptyState()
 
-    // Hazard: inst 1 in ID, inst 0 in EX (RAW) - stall one cycle
-    const inst0InEX =
-      state.EX?.type === "instruction" && state.EX.index === 0
-    const inst1InID =
-      state["ID/RF"]?.type === "instruction" && state["ID/RF"].index === 1
-    const shouldStall = inst0InEX && inst1InID
+    // Handle assigning to IF separately
+    for (let stageIndex = STAGE_ORDER.length - 1; stageIndex > 0; stageIndex--) {
+      // `nextStage` is the stage we are assigning to in `next` (otherwise, WB would be useless)
+      const nextStage = STAGE_ORDER[stageIndex];
+      const previousStage = STAGE_ORDER[stageIndex - 1];
 
-    if (shouldStall) {
-      // Inst 0: EX -> MEM
-      next.MEM = state.EX
-      // Bubble in EX
-      next.EX = { type: "bubble", causedByStallOf: 1 }
-      // Inst 1 stays in ID (stalled)
-      next["ID/RF"] = {
-        type: "instruction",
-        index: 1,
-        stalled: true,
-      }
-      // Inst 2 stays in IF (stalled)
-      if (state.IF?.type === "instruction") {
-        next.IF = {
-          type: "instruction",
-          index: state.IF.index,
+      if (state[previousStage] === null || state[previousStage].type !== "instruction") continue
+
+      const currentInstructionIndex = state[previousStage].index
+      const currentInstruction = instructions[currentInstructionIndex]
+
+      // If instruction has dependency, stall it
+      if (hasUnresolvedDependency(
+          currentInstruction,
+          currentInstructionIndex,
+          next,
+          instructions,
+          STAGE_ORDER.slice(stageIndex + 1))
+      ) {
+        // To stall: Instruction stays in the same stage as before and we mark that it is stalled
+        next[previousStage] = {
+          ...state[previousStage],
           stalled: true,
         }
-      }
-      // MEM -> WB, WB retires
-      next.WB = state.MEM
-    } else {
-      // Normal advance: WB -> retire, MEM -> WB, EX -> MEM, ID -> EX, IF -> ID, fetch
-      next.WB = state.MEM
-      next.MEM = state.EX
-      next.EX = state["ID/RF"]
-      next["ID/RF"] = state.IF
 
-      if (nextFetchIndex < count) {
-        next.IF = { type: "instruction", index: nextFetchIndex }
-        nextFetchIndex++
+        continue
       }
+
+      // If there's no dependency, advance it
+      next[nextStage] = {
+        ...state[previousStage],
+        stalled: false,
+      }
+    }
+
+    // If IF stage is empty, then fetch a new instruction
+    if (next.IF === null && nextFetchIndex < count) {
+      next.IF = {
+        type: "instruction",
+        index: nextFetchIndex,
+        stalled: false,
+      }
+      nextFetchIndex++
     }
 
     state = next
     cycle++
 
-    // Record snapshot for this cycle (state after advance)
     snapshots.push({
       cycle: cycle - 1,
-      IF: state.IF,
-      "ID/RF": state["ID/RF"],
-      EX: state.EX,
-      MEM: state.MEM,
-      WB: state.WB,
+      ...state
     })
 
-    // Check if simulation is done: pipeline empty and no more to fetch
+    console.log("State", state)
+
     const pipelineEmpty = STAGE_ORDER.every((s) => state[s] === null)
     if (pipelineEmpty && nextFetchIndex >= count) {
-      // Don't keep the final empty snapshot
       snapshots.pop()
       break
     }
 
-    // Safety limit
-    if (cycle > 200) break
+    if (cycle > 500) break
   }
 
   return snapshots

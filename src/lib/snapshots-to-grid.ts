@@ -1,14 +1,16 @@
 import type { CycleSnapshot, PipelineStage } from "./pipeline-types"
+import { STAGE_ORDER } from "./pipeline-types"
 
 export type GridCellContent =
   | { type: "stage"; stage: PipelineStage }
   | { type: "bubble" }
 
 /**
- * For a given (instructionIndex, cycle), returns what to display in that cell.
- * - stage: instruction is in this pipeline stage
- * - bubble: instruction is stalled (show bubble instead of stage)
- * - null: instruction not in pipeline this cycle
+ * Returns the content of a grid cell for a given instruction and cycle.
+ * @param instructionIndex - The index of the instruction
+ * @param cycle - The cycle
+ * @param snapshots - The snapshots
+ * @returns The content of the grid cell
  */
 export function getCellContent(
   instructionIndex: number,
@@ -18,15 +20,7 @@ export function getCellContent(
   const snapshot = snapshots[cycle]
   if (!snapshot) return null
 
-  const stages: Array<keyof Omit<CycleSnapshot, "cycle">> = [
-    "IF",
-    "ID/RF",
-    "EX",
-    "MEM",
-    "WB",
-  ]
-
-  for (const stage of stages) {
+  for (const stage of STAGE_ORDER) {
     const content = snapshot[stage]
     if (content?.type === "instruction" && content.index === instructionIndex) {
       if (content.stalled) {

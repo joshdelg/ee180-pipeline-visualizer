@@ -1,27 +1,22 @@
-import { useState } from "react"
+import { useState, useMemo } from "react"
 
 import { EditorPanel } from "@/components/editor-panel"
 import { StepControls } from "@/components/step-controls"
 import { VisualizationPanel } from "@/components/visualization-panel"
+import { parse } from "@/lib/mips-parser"
 
 const DEFAULT_MIPS = `# Enter your MIPS assembly code here
 add $t0, $t1, $t2
-lw $s0, 0($sp)
+add $t3, $t0, $t4
 sw $s1, 4($sp)`
 
 function App() {
   const [assemblyCode, setAssemblyCode] = useState(DEFAULT_MIPS)
   const [currentStep, setCurrentStep] = useState(0)
 
-  // Placeholder: count non-empty, non-comment lines as instructions
-  const instructionCount = assemblyCode
-    ? assemblyCode
-        .split("\n")
-        .filter((line) => {
-          const trimmed = line.trim()
-          return trimmed.length > 0 && !trimmed.startsWith("#")
-        }).length
-    : 0
+  const parseResult = useMemo(() => parse(assemblyCode), [assemblyCode])
+  const { instructions, errors } = parseResult
+  const instructionCount = instructions.length
 
   const handleStepBack = () => {
     setCurrentStep((prev) => Math.max(0, prev - 1))
@@ -48,7 +43,10 @@ function App() {
           </div>
         </aside>
         <section className="flex flex-1 flex-col overflow-hidden p-3">
-          <VisualizationPanel />
+          <VisualizationPanel
+            instructions={instructions}
+            parseErrors={errors}
+          />
         </section>
       </main>
     </div>
