@@ -5,16 +5,28 @@ export interface PipelineInstruction {
   index: number
 }
 
-/**
- * Returns the pipeline stage for instruction at index `instructionIndex`
- * during clock cycle `cycle`, or null if the instruction isn't in any stage.
- */
-export function getStageAtCycle(
-  instructionIndex: number,
+export interface ForwardFrom {
+  instructionIndex: number
+  stage: PipelineStage
+}
+
+export type StageContent =
+  | {
+      type: "instruction"
+      index: number
+      stalled?: boolean
+      forwardedFrom?: ForwardFrom
+    }
+  | {
+      type: "bubble"
+      causedByStallOf?: number
+    }
+
+export interface CycleSnapshot {
   cycle: number
-): PipelineStage | null {
-  const offset = cycle - instructionIndex
-  if (offset < 0 || offset > 4) return null
-  const stages: PipelineStage[] = ["IF", "ID/RF", "EX", "MEM", "WB"]
-  return stages[offset]
+  IF: StageContent | null
+  "ID/RF": StageContent | null
+  EX: StageContent | null
+  MEM: StageContent | null
+  WB: StageContent | null
 }

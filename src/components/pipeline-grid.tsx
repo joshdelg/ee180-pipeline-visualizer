@@ -1,8 +1,10 @@
 import {
+  type CycleSnapshot,
   type PipelineInstruction,
   type PipelineStage,
-  getStageAtCycle,
 } from "@/lib/pipeline-types"
+import { getCellContent } from "@/lib/snapshots-to-grid"
+import type { GridCellContent } from "@/lib/snapshots-to-grid"
 import { cn } from "@/lib/utils"
 
 const STAGE_COLORS: Record<PipelineStage, string> = {
@@ -14,30 +16,46 @@ const STAGE_COLORS: Record<PipelineStage, string> = {
 }
 
 interface PipelineCellProps {
-  stage: PipelineStage | null
+  content: GridCellContent | null
 }
 
-function PipelineCell({ stage }: PipelineCellProps) {
+function PipelineCell({ content }: PipelineCellProps) {
+  if (content === null) {
+    return (
+      <div className="flex min-h-10 min-w-14 items-center justify-center rounded border border-border/50 bg-muted/30 text-muted-foreground text-xs">
+        —
+      </div>
+    )
+  }
+
+  if (content.type === "bubble") {
+    return (
+      <div className="flex min-h-10 min-w-14 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400">
+        bubble
+      </div>
+    )
+  }
+
   return (
     <div
       className={cn(
         "flex min-h-10 min-w-14 items-center justify-center rounded border text-xs font-medium",
-        stage
-          ? STAGE_COLORS[stage]
-          : "border-border/50 bg-muted/30 text-muted-foreground"
+        STAGE_COLORS[content.stage]
       )}
     >
-      {stage ?? "—"}
+      {content.stage}
     </div>
   )
 }
 
 interface PipelineRowProps {
   instruction: PipelineInstruction
-  cycleCount: number
+  snapshots: CycleSnapshot[]
 }
 
-function PipelineRow({ instruction, cycleCount }: PipelineRowProps) {
+function PipelineRow({ instruction, snapshots }: PipelineRowProps) {
+  const cycleCount = snapshots.length
+
   return (
     <div className="flex items-center gap-2">
       <div className="w-28 shrink-0 truncate text-xs font-mono text-muted-foreground">
@@ -47,7 +65,7 @@ function PipelineRow({ instruction, cycleCount }: PipelineRowProps) {
         {Array.from({ length: cycleCount }, (_, cycle) => (
           <PipelineCell
             key={cycle}
-            stage={getStageAtCycle(instruction.index, cycle)}
+            content={getCellContent(instruction.index, cycle, snapshots)}
           />
         ))}
       </div>
@@ -57,10 +75,12 @@ function PipelineRow({ instruction, cycleCount }: PipelineRowProps) {
 
 interface PipelineGridProps {
   instructions: PipelineInstruction[]
-  cycleCount: number
+  snapshots: CycleSnapshot[]
 }
 
-export function PipelineGrid({ instructions, cycleCount }: PipelineGridProps) {
+export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
+  const cycleCount = snapshots.length
+
   return (
     <div className="flex flex-col gap-2 overflow-auto p-4">
       {/* Axis labels */}
@@ -93,7 +113,7 @@ export function PipelineGrid({ instructions, cycleCount }: PipelineGridProps) {
           <PipelineRow
             key={instruction.index}
             instruction={instruction}
-            cycleCount={cycleCount}
+            snapshots={snapshots}
           />
         ))}
       </div>
