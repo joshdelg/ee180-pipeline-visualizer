@@ -55,16 +55,16 @@ function getRegisterDependencies(
   const deps = new Map<number, ForwardSource>()
   const readRegs = getRegistersRead(consumer)
   if (readRegs.length === 0) {
-    console.log(`${consumer.text} does not read any registers, so it does not have a dependency`)
+    console.log(`[${consumer.index}] ${consumer.text} does not read any registers, so it does not have a dependency`)
     return deps
   }
 
   const consumerStageIndex = STAGE_ORDER.indexOf(consumerStage)
   for (const stage of STAGE_ORDER.slice(consumerStageIndex + 1)) {
-    console.log(`Searching for dependency in stage: ${stage}`)
+    console.log(`[${consumer.index}] Searching for dependency in stage: ${stage}`)
     const producerContent = nextState[stage]
     if (producerContent?.type !== "instruction") {
-      console.log(`Stage ${stage} is not an instruction, so it cannot be a dependency`)
+      console.log(`[${consumer.index}] Stage ${stage} is not an instruction, so it cannot be a dependency`)
       continue
     }
 
@@ -74,7 +74,7 @@ function getRegisterDependencies(
     if (!readRegs.includes(writtenReg)) continue
     if (deps.has(writtenReg)) continue
 
-    console.log(`Producer instruction ${producer.text} writes register: $${getRegisterName(writtenReg) ?? writtenReg}, which is read by ${consumer.text}`)
+    console.log(`[${consumer.index}] Producer instruction [${producerContent.index}] ${producer.text} writes register: $${getRegisterName(writtenReg) ?? writtenReg}, which is read by [${consumer.index}] ${consumer.text}`)
     deps.set(writtenReg, {
       instructionIndex: producerContent.index,
       stage,
@@ -109,15 +109,32 @@ export function simulate(
 
     // Handle assigning to IF separately
     for (let stageIndex = STAGE_ORDER.length - 1; stageIndex > 0; stageIndex--) {
+      console.log(`Promoting from stage: ${STAGE_ORDER[stageIndex - 1]} to stage: ${STAGE_ORDER[stageIndex]}`)
+      
       const promotingToStage = STAGE_ORDER[stageIndex];
       const currentlyInStage = STAGE_ORDER[stageIndex - 1];
 
       const currentStageContent = state[currentlyInStage];
     
-      if (currentStageContent === null || currentStageContent.type !== "instruction") continue
+      if (currentStageContent === null || currentStageContent.type !== "instruction") {
+        console.log(`No instruction previously at ${currentlyInStage}, so we cannot promote`)
+        continue
+      }
 
       const currentInstructionIndex = currentStageContent.index
       const currentInstruction = instructions[currentInstructionIndex]
+
+      const isNextPipelineStageFree = next[promotingToStage] === null;
+      if (!isNextPipelineStageFree) {
+        console.log(`Next pipeline stage ${promotingToStage} is not free, so we must stall`)
+        next[currentlyInStage] = {
+          type: "instruction",
+          index: currentInstructionIndex,
+          stalled: true,
+          forwardedFrom: undefined,
+        }
+        continue
+      }
 
       // Check if instruction is going to enter a stage that requires data
       const dataRequiredStage = getDataRequiredStage(
@@ -136,7 +153,7 @@ export function simulate(
         continue
       }
 
-      console.log(`${currentInstruction.text} is going to enter data-requiring stage: ${promotingToStage}`)
+      console.log(`[${currentInstructionIndex}] ${currentInstruction.text} is going to enter data-requiring stage: ${promotingToStage}`)
 
       const registerDeps = getRegisterDependencies(
         currentInstruction,
@@ -146,7 +163,7 @@ export function simulate(
       )
 
       if (registerDeps.size === 0) {
-        console.log(`Since ${currentInstruction.text} does not have a dependency, we can advance`)
+        console.log(`[${currentInstructionIndex}] Since ${currentInstruction.text} does not have a dependency, we can advance`)
         next[promotingToStage] = {
           type: "instruction",
           index: currentInstructionIndex,
@@ -156,7 +173,7 @@ export function simulate(
         continue
       }
 
-      console.log(`If promoted, ${currentInstruction.text} would depend on ${registerDeps.size} register(s): ${[...registerDeps.keys()].map((r) => `$${getRegisterName(r) ?? r}`).join(", ")}`)
+      console.log(`[${currentInstructionIndex}] If promoted, ${currentInstruction.text} would depend on ${registerDeps.size} register(s): ${[...registerDeps.keys()].map((r) => `$${getRegisterName(r) ?? r}`).join(", ")}`)
 
       // For each register with a dependency, check if we can forward
       let canForwardAll = true
@@ -175,16 +192,16 @@ export function simulate(
 
         if (producerHasDataReady) {
           forwardedFrom[reg] = producer
-          console.log(`Register $${getRegisterName(reg) ?? reg}: producer ${producerInst.text} in ${producer.stage} has data ready (available after ${dataAvailableAfterStage})`)
+          console.log(`[${currentInstructionIndex}] Register $${getRegisterName(reg) ?? reg}: producer [${producer.instructionIndex}] ${producerInst.text} in ${producer.stage} has data ready (available after ${dataAvailableAfterStage})`)
         } else {
-          console.log(`Register $${getRegisterName(reg) ?? reg}: producer ${producerInst.text} in ${producer.stage} does NOT have data ready (available after ${dataAvailableAfterStage})`)
+          console.log(`[${currentInstructionIndex}] Register $${getRegisterName(reg) ?? reg}: producer [${producer.instructionIndex}] ${producerInst.text} in ${producer.stage} does NOT have data ready (available after ${dataAvailableAfterStage})`)
           canForwardAll = false
           break
         }
       }
 
       if (canForwardAll) {
-        console.log(`Since all dependencies can be forwarded, we can advance ${currentInstruction.text} with forwarding`)
+        console.log(`[${currentInstructionIndex}] Since all dependencies can be forwarded, we can advance ${currentInstruction.text} with forwarding`)
         next[promotingToStage] = {
           type: "instruction",
           index: currentInstructionIndex,
@@ -194,7 +211,7 @@ export function simulate(
         continue
       }
       
-      console.log(`Since data would not be available in time, we must stall ${currentInstruction.text}`)
+      console.log(`[${currentInstructionIndex}] Since data would not be available in time, we must stall ${currentInstruction.text}`)
       next[currentlyInStage] = {
         type: "instruction",
         index: currentInstructionIndex,
@@ -222,7 +239,7 @@ export function simulate(
       ...state
     })
 
-    console.log(state)
+    console.log(`cycle ${cycle - 1}:`, JSON.parse(JSON.stringify(state)))
 
     const pipelineEmpty = STAGE_ORDER.every((s) => state[s] === null)
     if (pipelineEmpty && nextFetchIndex >= count) {

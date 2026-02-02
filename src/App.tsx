@@ -2,21 +2,17 @@ import { useState, useMemo } from "react"
 
 import { EditorPanel } from "@/components/editor-panel"
 import { OptLevelSelector } from "@/components/opt-level-selector"
+import { SnippetSelector } from "@/components/snippet-selector"
 import { StepControls } from "@/components/step-controls"
 import { VisualizationPanel } from "@/components/visualization-panel"
+import { ASSEMBLY_SNIPPETS } from "@/lib/assembly-snippets"
 import { parse } from "@/lib/mips-parser"
 import { OPT_LEVEL_NONE, type OptLevel } from "@/lib/pipeline-data-availability"
 
-const DEFAULT_MIPS = `# Enter your MIPS assembly code here
-add $t1, $t2, $t3
-sub $t4, $t1, $t3
-add $t6, $t1, $t7
-add $t8, $t1, $s0
-add $s1, $t1, $s2
-`
-
 function App() {
-  const [assemblyCode, setAssemblyCode] = useState(DEFAULT_MIPS)
+  const [assemblyCode, setAssemblyCode] = useState(
+    () => ASSEMBLY_SNIPPETS[0].code
+  )
   const [currentStep, setCurrentStep] = useState(0)
   const [optLevel, setOptLevel] = useState<OptLevel>(OPT_LEVEL_NONE)
 
@@ -45,6 +41,7 @@ function App() {
       <main className="flex flex-1 overflow-hidden">
         <aside className="flex w-80 shrink-0 flex-col border-r bg-muted/30">
           <div className="flex h-full flex-col gap-3 p-3">
+            <SnippetSelector value={assemblyCode} onChange={setAssemblyCode} />
             <div className="min-h-0 flex-1">
               <EditorPanel value={assemblyCode} onChange={setAssemblyCode} />
             </div>
