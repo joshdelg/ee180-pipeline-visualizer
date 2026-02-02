@@ -144,11 +144,30 @@ export function simulate(
 
       const doesStageRequireData = dataRequiredStage === promotingToStage;
       if (!doesStageRequireData) {
+        // When promoting to ID/RF, still record fast RF (WB→ID/RF) if we have a read dependency on an instruction in WB
+        let forwardedFrom: Record<number, ForwardSource> | undefined = undefined
+        if (promotingToStage === "ID/RF") {
+          const registerDeps = getRegisterDependencies(
+            currentInstruction,
+            "ID/RF",
+            next,
+            instructions,
+          )
+          const fastRfFrom: Record<number, ForwardSource> = {}
+          for (const [reg, producer] of registerDeps) {
+            if (producer.stage === "WB") {
+              fastRfFrom[reg] = producer
+            }
+          }
+          if (Object.keys(fastRfFrom).length > 0) {
+            forwardedFrom = fastRfFrom
+          }
+        }
         next[promotingToStage] = {
           type: "instruction",
           index: currentInstructionIndex,
           stalled: false,
-          forwardedFrom: undefined,
+          forwardedFrom,
         }
         continue
       }

@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react"
 import type { ForwardingPath } from "@/lib/forwarding-paths"
-import { getRegisterId } from "@/lib/forwarding-paths"
+import {
+  getRegisterId,
+  isFastRfPath,
+  getFastRfAnchorFromId,
+  getFastRfAnchorToId,
+} from "@/lib/forwarding-paths"
 
 interface LeaderLineInstance {
   position(): LeaderLineInstance
@@ -25,8 +30,13 @@ export function ForwardingPathsOverlay({
     const lines: LeaderLineInstance[] = []
 
     for (const path of paths) {
-      const fromId = getRegisterId(path.fromInstructionIndex, path.cycle)
-      const toId = getRegisterId(path.toInstructionIndex, path.cycle)
+      const isFastRf = isFastRfPath(path)
+      const fromId = isFastRf
+        ? getFastRfAnchorFromId(path.fromInstructionIndex, path.cycle)
+        : getRegisterId(path.fromInstructionIndex, path.cycle)
+      const toId = isFastRf
+        ? getFastRfAnchorToId(path.toInstructionIndex, path.cycle)
+        : getRegisterId(path.toInstructionIndex, path.cycle)
 
       const fromEl = document.getElementById(fromId)
       const toEl = document.getElementById(toId)
@@ -44,8 +54,8 @@ export function ForwardingPathsOverlay({
           endPlugColor: "#16a34a",
           startSocket: "bottom",
           endSocket: "top",
-          startSocketGravity: [80, 0],
-          endSocketGravity: [-80, 0],
+          startSocketGravity: isFastRf ? [0, 0] : [80, 0],
+          endSocketGravity: isFastRf ? [0, 0] : [-80, 0],
         })
         lines.push(line)
       }

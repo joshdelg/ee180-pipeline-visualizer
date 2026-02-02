@@ -1,9 +1,11 @@
-import type { CycleSnapshot } from "./pipeline-types"
+import type { CycleSnapshot, PipelineStage } from "./pipeline-types"
 import { STAGE_ORDER } from "./pipeline-types"
 
 export interface ForwardingPath {
   fromInstructionIndex: number
   toInstructionIndex: number
+  fromStage: PipelineStage
+  toStage: PipelineStage
   cycle: number
   register: number
 }
@@ -31,6 +33,8 @@ export function getForwardingPaths(
         paths.push({
           fromInstructionIndex: source.instructionIndex,
           toInstructionIndex,
+          fromStage: source.stage,
+          toStage: stage,
           cycle,
           register: Number(register),
         })
@@ -52,4 +56,22 @@ export function getRegisterId(
   cycle: number
 ): string {
   return `register-${instructionIndex}-${cycle}`
+}
+/** Whether this path is WB → ID/RF (fast RF) forwarding */
+export function isFastRfPath(path: ForwardingPath): boolean {
+  return path.fromStage === "WB" && path.toStage === "ID/RF"
+}
+/** DOM id for the fast-RF arrow start (center of left half of WB cell) */
+export function getFastRfAnchorFromId(
+  instructionIndex: number,
+  cycle: number
+): string {
+  return `fast-rf-from-${instructionIndex}-${cycle}`
+}
+/** DOM id for the fast-RF arrow end (center of right half of ID/RF cell) */
+export function getFastRfAnchorToId(
+  instructionIndex: number,
+  cycle: number
+): string {
+  return `fast-rf-to-${instructionIndex}-${cycle}`
 }

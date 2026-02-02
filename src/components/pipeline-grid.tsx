@@ -5,7 +5,13 @@ import {
   type PipelineStage,
 } from "@/lib/pipeline-types"
 import { STAGE_ORDER } from "@/lib/pipeline-types"
-import { getForwardingPaths, getRegisterId } from "@/lib/forwarding-paths"
+import {
+  getForwardingPaths,
+  getRegisterId,
+  isFastRfPath,
+  getFastRfAnchorFromId,
+  getFastRfAnchorToId,
+} from "@/lib/forwarding-paths"
 import { getCellContent } from "@/lib/snapshots-to-grid"
 import type { GridCellContent } from "@/lib/snapshots-to-grid"
 import { cn } from "@/lib/utils"
@@ -23,6 +29,18 @@ const STAGE_COLORS: Record<PipelineStage, string> = {
   MEM: "bg-violet-500/20 border-violet-500/40 dark:bg-violet-500/15",
   WB: "bg-rose-500/20 border-rose-500/40 dark:bg-rose-500/15",
 }
+/** Left half of WB when it's the fast-RF source (forwarding from here) */
+const FAST_RF_WB_LEFT =
+  "bg-green-500/30 border-green-500/50 dark:bg-green-500/25 border-rose-500/40"
+/** Right half of WB when it's the fast-RF source (normal stage) */
+const FAST_RF_WB_RIGHT =
+  "bg-rose-500/20 border-rose-500/40 dark:bg-rose-500/15"
+/** Left half of ID/RF when it's the fast-RF target (normal stage) */
+const FAST_RF_IDRF_LEFT =
+  "bg-amber-500/20 border-amber-500/40 dark:bg-amber-500/15"
+/** Right half of ID/RF when it's the fast-RF target (forwarding to here) */
+const FAST_RF_IDRF_RIGHT =
+  "bg-green-500/30 border-green-500/50 dark:bg-green-500/25 border-amber-500/40"
 
 const PIPELINE_REGISTER_WIDTH = "w-1.5"
 
@@ -80,12 +98,18 @@ interface PipelineCellProps {
   content: GridCellContent | null
   instructionIndex: number
   cycle: number
+  /** This cycle is the WB producer of a WB→ID/RF (fast RF) path */
+  isFastRfProducer?: boolean
+  /** This cycle is the ID/RF consumer of a WB→ID/RF (fast RF) path */
+  isFastRfConsumer?: boolean
 }
 
 function PipelineCell({
   content,
   instructionIndex,
   cycle,
+  isFastRfProducer = false,
+  isFastRfConsumer = false,
 }: PipelineCellProps) {
   const cellId = `cell-${instructionIndex}-${cycle}`
 
@@ -107,6 +131,63 @@ function PipelineCell({
         className="flex min-h-10 min-w-14 shrink-0 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400"
       >
         bubble
+      </div>
+    )
+  }
+
+  const isWbFastRf = content.stage === "WB" && isFastRfProducer
+  const isIdRfFastRf = content.stage === "ID/RF" && isFastRfConsumer
+
+  if (isWbFastRf) {
+    return (
+      <div
+        id={cellId}
+        className="flex min-h-10 min-w-14 shrink-0 overflow-hidden rounded border border-rose-500/40 text-xs font-medium"
+      >
+        <div
+          id={getFastRfAnchorFromId(instructionIndex, cycle)}
+          className={cn(
+            "flex flex-1 min-w-0 items-center justify-center rounded-l border-r border-rose-500/40",
+            FAST_RF_WB_LEFT
+          )}
+        >
+          WB
+        </div>
+        <div
+          className={cn(
+            "flex flex-1 min-w-0 items-center justify-center rounded-r",
+            FAST_RF_WB_RIGHT
+          )}
+        >
+          WB
+        </div>
+      </div>
+    )
+  }
+
+  if (isIdRfFastRf) {
+    return (
+      <div
+        id={cellId}
+        className="flex min-h-10 min-w-14 shrink-0 overflow-hidden rounded border border-amber-500/40 text-xs font-medium"
+      >
+        <div
+          className={cn(
+            "flex flex-1 min-w-0 items-center justify-center rounded-l border-r border-amber-500/40",
+            FAST_RF_IDRF_LEFT
+          )}
+        >
+          ID/RF
+        </div>
+        <div
+          id={getFastRfAnchorToId(instructionIndex, cycle)}
+          className={cn(
+            "flex flex-1 min-w-0 items-center justify-center rounded-r",
+            FAST_RF_IDRF_RIGHT
+          )}
+        >
+          ID/RF
+        </div>
       </div>
     )
   }
@@ -140,9 +221,18 @@ function shouldShowPipelineRegister(
 interface PipelineRowProps {
   instruction: PipelineInstruction
   snapshots: CycleSnapshot[]
+  /** Cycles where this instruction is the WB producer in a WB→ID/RF path */
+  fastRfProducerCycles: Set<number>
+  /** Cycles where this instruction is the ID/RF consumer in a WB→ID/RF path */
+  fastRfConsumerCycles: Set<number>
 }
 
-function PipelineRow({ instruction, snapshots }: PipelineRowProps) {
+function PipelineRow({
+  instruction,
+  snapshots,
+  fastRfProducerCycles,
+  fastRfConsumerCycles,
+}: PipelineRowProps) {
   const cycleCount = snapshots.length
 
   return (
@@ -184,6 +274,8 @@ function PipelineRow({ instruction, snapshots }: PipelineRowProps) {
                 content={content}
                 instructionIndex={instruction.index}
                 cycle={cycle}
+                isFastRfProducer={fastRfProducerCycles.has(cycle)}
+                isFastRfConsumer={fastRfConsumerCycles.has(cycle)}
               />
             </div>
           )
@@ -202,6 +294,23 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
   const cycleCount = snapshots.length
   const forwardingPaths = getForwardingPaths(snapshots)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const fastRfPaths = forwardingPaths.filter(isFastRfPath)
+  const fastRfProducerByInstruction = new Map<number, Set<number>>()
+  const fastRfConsumerByInstruction = new Map<number, Set<number>>()
+  for (const path of fastRfPaths) {
+    if (!fastRfProducerByInstruction.has(path.fromInstructionIndex)) {
+      fastRfProducerByInstruction.set(
+        path.fromInstructionIndex,
+        new Set<number>()
+      )
+    }
+    fastRfProducerByInstruction.get(path.fromInstructionIndex)!.add(path.cycle)
+    if (!fastRfConsumerByInstruction.has(path.toInstructionIndex)) {
+      fastRfConsumerByInstruction.set(path.toInstructionIndex, new Set<number>())
+    }
+    fastRfConsumerByInstruction.get(path.toInstructionIndex)!.add(path.cycle)
+  }
 
   return (
     <div
@@ -248,6 +357,12 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
             key={instruction.index}
             instruction={instruction}
             snapshots={snapshots}
+            fastRfProducerCycles={
+              fastRfProducerByInstruction.get(instruction.index) ?? new Set()
+            }
+            fastRfConsumerCycles={
+              fastRfConsumerByInstruction.get(instruction.index) ?? new Set()
+            }
           />
         ))}
       </div>

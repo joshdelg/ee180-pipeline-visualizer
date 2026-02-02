@@ -8,6 +8,7 @@ import { VisualizationPanel } from "@/components/visualization-panel"
 import { ASSEMBLY_SNIPPETS } from "@/lib/assembly-snippets"
 import { parse } from "@/lib/mips-parser"
 import { OPT_LEVEL_NONE, type OptLevel } from "@/lib/pipeline-data-availability"
+import { ModeToggle } from "./components/mode-toggle"
 
 function App() {
   const [assemblyCode, setAssemblyCode] = useState(
@@ -38,6 +39,7 @@ function App() {
         currentStep={currentStep}
         totalSteps={instructionCount}
       /> */}
+      <ModeToggle />
       <main className="flex flex-1 overflow-hidden">
         <aside className="flex w-80 shrink-0 flex-col border-r bg-muted/30">
           <div className="flex h-full flex-col gap-3 p-3">
