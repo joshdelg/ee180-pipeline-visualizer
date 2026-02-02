@@ -1,6 +1,3 @@
-import { ChevronLeft } from "lucide-react"
-
-import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/mode-toggle"
 
 interface StepControlsProps {
@@ -13,9 +10,9 @@ interface StepControlsProps {
 }
 
 export function StepControls({
-  onStepBack,
+  onStepBack: _onStepBack,
   onStepForward: _onStepForward,
-  canStepBack = true,
+  canStepBack: _canStepBack = true,
   canStepForward: _canStepForward = true,
   currentStep = 0,
   totalSteps = 0,

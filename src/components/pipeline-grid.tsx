@@ -4,10 +4,16 @@ import {
   type PipelineInstruction,
   type PipelineStage,
 } from "@/lib/pipeline-types"
-import { getForwardingPaths } from "@/lib/forwarding-paths"
+import { STAGE_ORDER } from "@/lib/pipeline-types"
+import { getForwardingPaths, getRegisterId } from "@/lib/forwarding-paths"
 import { getCellContent } from "@/lib/snapshots-to-grid"
 import type { GridCellContent } from "@/lib/snapshots-to-grid"
 import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { ForwardingPathsOverlay } from "@/components/forwarding-paths-overlay"
 
 const STAGE_COLORS: Record<PipelineStage, string> = {
@@ -16,6 +22,58 @@ const STAGE_COLORS: Record<PipelineStage, string> = {
   EX: "bg-emerald-500/20 border-emerald-500/40 dark:bg-emerald-500/15",
   MEM: "bg-violet-500/20 border-violet-500/40 dark:bg-violet-500/15",
   WB: "bg-rose-500/20 border-rose-500/40 dark:bg-rose-500/15",
+}
+
+const PIPELINE_REGISTER_WIDTH = "w-1.5"
+
+function getPipelineRegisterName(
+  leftContent: GridCellContent | null,
+  rightContent: GridCellContent | null
+): string {
+  if (leftContent === null || rightContent === null || rightContent.type === "bubble") return ""
+
+  const rightStageName = rightContent.stage
+
+  if(leftContent?.type === "bubble") {
+    const leftStageName = STAGE_ORDER[STAGE_ORDER.indexOf(rightStageName) - 1]
+    return `${leftStageName}/${rightStageName}`
+  }
+
+  return `${leftContent.stage}/${rightStageName}`
+}
+
+interface PipelineRegisterProps {
+  /** When false, render as placeholder (very light) to maintain alignment */
+  active?: boolean
+  /** Name shown in tooltip */
+  name?: string
+  /** Unique id for forwarding path anchoring */
+  id?: string
+}
+
+function PipelineRegister({ active = true, name, id }: PipelineRegisterProps) {
+  const label = `${name} Pipeline Register`
+  const div = (
+    <div
+      id={id}
+      className={cn(
+        "shrink-0 self-stretch rounded-sm",
+        PIPELINE_REGISTER_WIDTH,
+        active
+          ? "cursor-default bg-muted-foreground/30 dark:bg-muted-foreground/20"
+          : "bg-transparent dark:bg-transparent"
+      )}
+    />
+  )
+  if (!active) return div
+  return (
+    <Tooltip delayDuration={0}>
+      <TooltipTrigger asChild>{div}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 interface PipelineCellProps {
@@ -35,7 +93,7 @@ function PipelineCell({
     return (
       <div
         id={cellId}
-        className="flex min-h-10 min-w-14 items-center justify-center rounded border border-border/50 bg-muted/30 text-muted-foreground text-xs"
+        className="flex min-h-10 min-w-14 shrink-0 items-center justify-center rounded border border-border/50 bg-muted/30 text-muted-foreground text-xs"
       >
         —
       </div>
@@ -46,7 +104,7 @@ function PipelineCell({
     return (
       <div
         id={cellId}
-        className="flex min-h-10 min-w-14 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400"
+        className="flex min-h-10 min-w-14 shrink-0 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400"
       >
         bubble
       </div>
@@ -57,13 +115,26 @@ function PipelineCell({
     <div
       id={cellId}
       className={cn(
-        "flex min-h-10 min-w-14 items-center justify-center rounded border text-xs font-medium",
+        "flex min-h-10 min-w-14 shrink-0 items-center justify-center rounded border text-xs font-medium",
         STAGE_COLORS[content.stage]
       )}
     >
       {content.stage}
     </div>
   )
+}
+
+function shouldShowPipelineRegister(
+  leftContent: GridCellContent | null,
+  rightContent: GridCellContent | null
+): boolean {
+  const leftIsBubbleOrEmpty = leftContent?.type === "bubble" || leftContent === null
+  const rightIsBubbleOrEmpty = rightContent?.type === "bubble" || rightContent === null
+
+  const bothAreNonEmpty = !leftIsBubbleOrEmpty && !rightIsBubbleOrEmpty
+  const bubbleOnLeftAndRightNonEmpty = leftContent?.type === "bubble" && !rightIsBubbleOrEmpty
+
+  return bothAreNonEmpty || bubbleOnLeftAndRightNonEmpty
 }
 
 interface PipelineRowProps {
@@ -79,15 +150,44 @@ function PipelineRow({ instruction, snapshots }: PipelineRowProps) {
       <div className="w-28 shrink-0 truncate text-xs font-mono text-muted-foreground">
         {instruction.text}
       </div>
-      <div className="flex flex-1 gap-1">
-        {Array.from({ length: cycleCount }, (_, cycle) => (
-          <PipelineCell
-            key={cycle}
-            content={getCellContent(instruction.index, cycle, snapshots)}
-            instructionIndex={instruction.index}
-            cycle={cycle}
-          />
-        ))}
+      <div className="flex flex-1 items-stretch gap-0.5">
+        {Array.from({ length: cycleCount }, (_, cycle) => {
+          const content = getCellContent(
+            instruction.index,
+            cycle,
+            snapshots
+          )
+          const previousContent =
+            cycle > 0
+              ? getCellContent(
+                  instruction.index,
+                  cycle - 1,
+                  snapshots
+                )
+              : null
+          const showRegBefore = shouldShowPipelineRegister(
+            previousContent,
+            content
+          )
+          const registerName = getPipelineRegisterName(previousContent, content)
+
+          return (
+            <div key={cycle} className="flex items-stretch gap-0.5">
+              {cycle > 0 && (
+                <PipelineRegister
+                  active={showRegBefore}
+                  name={registerName}
+                  id={getRegisterId(instruction.index, cycle)}
+                />
+              )}
+              <PipelineCell
+                content={content}
+                instructionIndex={instruction.index}
+                cycle={cycle}
+              />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -113,23 +213,28 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
         scrollContainerRef={scrollContainerRef}
       />
       {/* Axis labels */}
-      <div className="flex items-center gap-2">
-        <div className="flex w-28 shrink-0 items-center justify-center">
+      <div className="flex items-start gap-2">
+        <div className="flex w-28 shrink-0 items-center justify-center pt-6">
           <span className="text-muted-foreground text-xs font-medium">
             Instr. Order
           </span>
         </div>
-        <div className="flex flex-1 flex-col items-center gap-1">
+        <div className="flex flex-1 flex-col items-start gap-1 min-w-0">
           <span className="text-muted-foreground text-xs font-medium">
             Time (clock cycles)
           </span>
-          <div className="flex gap-1">
+          <div className="flex items-stretch gap-0.5 min-w-0">
             {Array.from({ length: cycleCount }, (_, i) => (
-              <div
-                key={i}
-                className="flex min-w-14 items-center justify-center text-xs text-muted-foreground"
-              >
-                {i}
+              <div key={i} className="flex items-stretch gap-0.5 shrink-0">
+                {i > 0 && (
+                  <div
+                    className={cn("shrink-0", PIPELINE_REGISTER_WIDTH)}
+                    aria-hidden
+                  />
+                )}
+                <div className="flex min-w-14 shrink-0 items-center justify-center text-xs text-muted-foreground">
+                  {i}
+                </div>
               </div>
             ))}
           </div>
@@ -137,7 +242,7 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
       </div>
 
       {/* Grid rows */}
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-4">
         {instructions.map((instruction) => (
           <PipelineRow
             key={instruction.index}

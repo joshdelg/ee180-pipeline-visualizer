@@ -45,3 +45,11 @@ export function getForwardingPaths(
 export function getCellId(instructionIndex: number, cycle: number): string {
   return `cell-${instructionIndex}-${cycle}`
 }
+
+/** Generates a stable DOM id for a pipeline register: register-{instructionIndex}-{cycle} */
+export function getRegisterId(
+  instructionIndex: number,
+  cycle: number
+): string {
+  return `register-${instructionIndex}-${cycle}`
+}

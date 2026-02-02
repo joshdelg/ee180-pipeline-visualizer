@@ -32,3 +32,22 @@ export function getCellContent(
 
   return null
 }
+
+/**
+ * Returns the content for a specific stage cell (instruction, cycle, stage).
+ */
+export function getCellContentForStage(
+  instructionIndex: number,
+  cycle: number,
+  stage: PipelineStage,
+  snapshots: CycleSnapshot[]
+): GridCellContent | null {
+  const snapshot = snapshots[cycle]
+  if (!snapshot) return null
+
+  const content = snapshot[stage]
+  if (content?.type !== "instruction" || content.index !== instructionIndex)
+    return null
+
+  return content.stalled ? { type: "bubble" } : { type: "stage", stage }
+}

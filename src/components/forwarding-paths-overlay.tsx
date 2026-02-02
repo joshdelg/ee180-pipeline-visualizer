@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { ForwardingPath } from "@/lib/forwarding-paths"
-import { getCellId } from "@/lib/forwarding-paths"
+import { getRegisterId } from "@/lib/forwarding-paths"
 
 interface LeaderLineInstance {
   position(): LeaderLineInstance
@@ -25,21 +25,27 @@ export function ForwardingPathsOverlay({
     const lines: LeaderLineInstance[] = []
 
     for (const path of paths) {
-      const fromId = getCellId(path.fromInstructionIndex, path.cycle)
-      const toId = getCellId(path.toInstructionIndex, path.cycle)
+      const fromId = getRegisterId(path.fromInstructionIndex, path.cycle)
+      const toId = getRegisterId(path.toInstructionIndex, path.cycle)
 
       const fromEl = document.getElementById(fromId)
       const toEl = document.getElementById(toId)
 
       if (fromEl && toEl) {
         const line = new LeaderLine(fromEl, toEl, {
-          path: "fluid",
-          color: "#22c55e",
-          size: 2,
+          path: "arc",
+          color: "#16a34a",
+          size: 3,
+          outline: true,
+          outlineColor: "#15803d",
+          dropShadow: true,
           startPlug: "behind",
-          endPlug: "behind",
+          endPlug: "arrow3",
+          endPlugColor: "#16a34a",
           startSocket: "bottom",
           endSocket: "top",
+          startSocketGravity: [80, 0],
+          endSocketGravity: [-80, 0],
         })
         lines.push(line)
       }
