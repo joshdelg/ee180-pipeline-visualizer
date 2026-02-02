@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -14,9 +14,9 @@ interface StepControlsProps {
 
 export function StepControls({
   onStepBack,
-  onStepForward,
+  onStepForward: _onStepForward,
   canStepBack = true,
-  canStepForward = true,
+  canStepForward: _canStepForward = true,
   currentStep = 0,
   totalSteps = 0,
 }: StepControlsProps) {
@@ -33,6 +33,7 @@ export function StepControls({
           >
             <ChevronLeft className="size-4" />
           </Button>
+          {/* Step forward commented out for now
           <Button
             variant="outline"
             size="icon"
@@ -41,7 +42,7 @@ export function StepControls({
             aria-label="Step forward"
           >
             <ChevronRight className="size-4" />
-          </Button>
+          </Button> */}
         </div>
         <span className="text-muted-foreground text-sm">
           Step {currentStep} of {totalSteps}
