@@ -4,17 +4,20 @@ import { PipelineGrid } from "@/components/pipeline-grid"
 import type { ParsedInstruction } from "@/lib/pipeline-types"
 import { simulate } from "@/lib/pipeline-simulator"
 import type { ParseError } from "@/lib/mips-parser"
+import type { OptLevel } from "@/lib/pipeline-data-availability"
 
 interface VisualizationPanelProps {
   instructions: ParsedInstruction[]
   parseErrors: ParseError[]
+  optLevel: OptLevel
 }
 
 export function VisualizationPanel({
   instructions,
   parseErrors,
+  optLevel,
 }: VisualizationPanelProps) {
-  const snapshots = simulate(instructions)
+  const snapshots = simulate(instructions, optLevel)
 
   return (
     <Card className="flex h-full flex-col overflow-hidden">

@@ -7,29 +7,41 @@ export interface PipelineInstruction {
   index: number
 }
 
-/**
- * Parsed instruction with operands for hazard detection.
- * rd/rs/rt are MIPS register numbers (0-31).
- */
-export interface ParsedInstruction extends PipelineInstruction {
-  opcode: string
-  rd: number | null
-  rs: number | null
-  rt: number | null
-  immediate: number | null
+export type RTypeOpcode = "add" | "addu" | "sub" | "subu"
+export type ITypeOpcode = "addi" | "addiu" | "lw" | "sw"
+
+export interface ParsedRType extends PipelineInstruction {
+  instructionType: "R"
+  opcode: RTypeOpcode
+  rd: number
+  rs: number
+  rt: number
 }
 
-export interface ForwardFrom {
+export interface ParsedIType extends PipelineInstruction {
+  instructionType: "I"
+  opcode: ITypeOpcode
+  rt: number
+  rs: number
+  immediate: number
+}
+
+export type ParsedInstruction = ParsedRType | ParsedIType
+
+export interface ForwardSource {
   instructionIndex: number
   stage: PipelineStage
 }
+
+/** Map from register number to the source of the forwarded value */
+export type ForwardedFrom = Record<number, ForwardSource>
 
 export type StageContent =
   | {
       type: "instruction"
       index: number
       stalled: boolean
-      forwardedFrom?: ForwardFrom
+      forwardedFrom?: ForwardedFrom
     }
   | {
       type: "bubble"

@@ -1,11 +1,14 @@
+import { useRef } from "react"
 import {
   type CycleSnapshot,
   type PipelineInstruction,
   type PipelineStage,
 } from "@/lib/pipeline-types"
+import { getForwardingPaths } from "@/lib/forwarding-paths"
 import { getCellContent } from "@/lib/snapshots-to-grid"
 import type { GridCellContent } from "@/lib/snapshots-to-grid"
 import { cn } from "@/lib/utils"
+import { ForwardingPathsOverlay } from "@/components/forwarding-paths-overlay"
 
 const STAGE_COLORS: Record<PipelineStage, string> = {
   IF: "bg-blue-500/20 border-blue-500/40 dark:bg-blue-500/15",
@@ -17,12 +20,23 @@ const STAGE_COLORS: Record<PipelineStage, string> = {
 
 interface PipelineCellProps {
   content: GridCellContent | null
+  instructionIndex: number
+  cycle: number
 }
 
-function PipelineCell({ content }: PipelineCellProps) {
+function PipelineCell({
+  content,
+  instructionIndex,
+  cycle,
+}: PipelineCellProps) {
+  const cellId = `cell-${instructionIndex}-${cycle}`
+
   if (content === null) {
     return (
-      <div className="flex min-h-10 min-w-14 items-center justify-center rounded border border-border/50 bg-muted/30 text-muted-foreground text-xs">
+      <div
+        id={cellId}
+        className="flex min-h-10 min-w-14 items-center justify-center rounded border border-border/50 bg-muted/30 text-muted-foreground text-xs"
+      >
         —
       </div>
     )
@@ -30,7 +44,10 @@ function PipelineCell({ content }: PipelineCellProps) {
 
   if (content.type === "bubble") {
     return (
-      <div className="flex min-h-10 min-w-14 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400">
+      <div
+        id={cellId}
+        className="flex min-h-10 min-w-14 items-center justify-center rounded border border-amber-500/60 bg-amber-500/15 text-amber-700 text-xs font-medium dark:text-amber-400"
+      >
         bubble
       </div>
     )
@@ -38,6 +55,7 @@ function PipelineCell({ content }: PipelineCellProps) {
 
   return (
     <div
+      id={cellId}
       className={cn(
         "flex min-h-10 min-w-14 items-center justify-center rounded border text-xs font-medium",
         STAGE_COLORS[content.stage]
@@ -66,6 +84,8 @@ function PipelineRow({ instruction, snapshots }: PipelineRowProps) {
           <PipelineCell
             key={cycle}
             content={getCellContent(instruction.index, cycle, snapshots)}
+            instructionIndex={instruction.index}
+            cycle={cycle}
           />
         ))}
       </div>
@@ -80,9 +100,18 @@ interface PipelineGridProps {
 
 export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
   const cycleCount = snapshots.length
+  const forwardingPaths = getForwardingPaths(snapshots)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   return (
-    <div className="flex flex-col gap-2 overflow-auto p-4">
+    <div
+      ref={scrollContainerRef}
+      className="relative flex flex-col gap-2 overflow-auto p-4"
+    >
+      <ForwardingPathsOverlay
+        paths={forwardingPaths}
+        scrollContainerRef={scrollContainerRef}
+      />
       {/* Axis labels */}
       <div className="flex items-center gap-2">
         <div className="flex w-28 shrink-0 items-center justify-center">

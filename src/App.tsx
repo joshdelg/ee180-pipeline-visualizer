@@ -1,18 +1,24 @@
 import { useState, useMemo } from "react"
 
 import { EditorPanel } from "@/components/editor-panel"
+import { OptLevelSelector } from "@/components/opt-level-selector"
 import { StepControls } from "@/components/step-controls"
 import { VisualizationPanel } from "@/components/visualization-panel"
 import { parse } from "@/lib/mips-parser"
+import { OPT_LEVEL_NONE, type OptLevel } from "@/lib/pipeline-data-availability"
 
 const DEFAULT_MIPS = `# Enter your MIPS assembly code here
-add $t0, $t1, $t2
-add $t3, $t0, $t4
-sw $s1, 4($sp)`
+add $t1, $t2, $t3
+sub $t4, $t1, $t3
+add $t6, $t1, $t7
+add $t8, $t1, $s0
+add $s1, $t1, $s2
+`
 
 function App() {
   const [assemblyCode, setAssemblyCode] = useState(DEFAULT_MIPS)
   const [currentStep, setCurrentStep] = useState(0)
+  const [optLevel, setOptLevel] = useState<OptLevel>(OPT_LEVEL_NONE)
 
   const parseResult = useMemo(() => parse(assemblyCode), [assemblyCode])
   const { instructions, errors } = parseResult
@@ -38,14 +44,18 @@ function App() {
       />
       <main className="flex flex-1 overflow-hidden">
         <aside className="flex w-80 shrink-0 flex-col border-r bg-muted/30">
-          <div className="flex h-full flex-col p-3">
-            <EditorPanel value={assemblyCode} onChange={setAssemblyCode} />
+          <div className="flex h-full flex-col gap-3 p-3">
+            <div className="min-h-0 flex-1">
+              <EditorPanel value={assemblyCode} onChange={setAssemblyCode} />
+            </div>
+            <OptLevelSelector value={optLevel} onChange={setOptLevel} />
           </div>
         </aside>
         <section className="flex flex-1 flex-col overflow-hidden p-3">
           <VisualizationPanel
             instructions={instructions}
             parseErrors={errors}
+            optLevel={optLevel}
           />
         </section>
       </main>

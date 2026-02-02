@@ -1,4 +1,8 @@
-import type { ParsedInstruction } from "./pipeline-types"
+import type {
+  ParsedInstruction,
+  ParsedIType,
+  ParsedRType,
+} from "./pipeline-types"
 
 export interface ParseError {
   line: number
@@ -47,6 +51,10 @@ const REGISTERS: Record<string, number> = {
   ra: 31,
 }
 
+export function getRegisterName(reg: number): string | null {
+  return Object.entries(REGISTERS).find(([, num]) => num === reg)?.[0] ?? null
+}
+
 function parseRegister(s: string): number | null {
   const trimmed = s.trim()
   if (!trimmed.startsWith("$")) return null
@@ -68,8 +76,7 @@ function parseImmediate(s: string): number | null {
 }
 
 const R_TYPE_OPS = ["add", "addu", "sub", "subu"]
-const I_TYPE_ARITH_OPS = ["addi", "addiu"]
-const LOAD_STORE_OPS = ["lw", "sw"]
+const I_TYPE_OPS = ["addi", "addiu", "lw", "sw"]
 
 /** Strips comment and trims. Returns null if line is empty or comment-only. */
 function stripLine(line: string): string | null {
@@ -132,23 +139,17 @@ export function parse(source: string): ParseResult {
         if (rs === null) err(`Invalid source register: ${operands[1]}`)
         if (rt === null) err(`Invalid source register: ${operands[2]}`)
       }
-    } else if (I_TYPE_ARITH_OPS.includes(opcode)) {
-      // addi $t, $s, imm
-      if (operands.length !== 3) {
-        err(`Expected 3 operands for ${opcode}`)
-      } else {
+    } else if (I_TYPE_OPS.includes(opcode)) {
+      if (operands.length === 3) {
+        // addi $t, $s, imm
         rt = parseRegister(operands[0])
         rs = parseRegister(operands[1])
         immediate = parseImmediate(operands[2])
         if (rt === null) err(`Invalid destination register: ${operands[0]}`)
         if (rs === null) err(`Invalid source register: ${operands[1]}`)
         if (immediate === null) err(`Invalid immediate: ${operands[2]}`)
-      }
-    } else if (LOAD_STORE_OPS.includes(opcode)) {
-      // lw $t, offset($s)  or  sw $t, offset($s)
-      if (operands.length !== 2) {
-        err(`Expected 2 operands for ${opcode}`)
-      } else {
+      } else if (operands.length === 2) {
+        // lw $t, offset($s)  or  sw $t, offset($s)
         rt = parseRegister(operands[0])
         const memMatch = operands[1].match(/^(-?\d+)\s*\(\s*\$(\w+)\s*\)$/)
         const memMatchAlt = operands[1].match(
@@ -170,29 +171,38 @@ export function parse(source: string): ParseResult {
         if (rt === null) err(`Invalid register: ${operands[0]}`)
         if (rs === null && operands[1].includes("("))
           err(`Invalid base register in ${operands[1]}`)
+      } else {
+        err(`Expected 2 or 3 operands for ${opcode}`)
       }
     } else {
       err(`Unsupported instruction: ${opcode}`)
       continue
     }
 
-    // Only add instruction if operands are valid
-    const isValid =
-      (R_TYPE_OPS.includes(opcode) && rd !== null && rs !== null && rt !== null) ||
-      (I_TYPE_ARITH_OPS.includes(opcode) &&
-        rt !== null &&
-        rs !== null &&
-        immediate !== null) ||
-      (LOAD_STORE_OPS.includes(opcode) && rt !== null && rs !== null)
-
-    if (isValid) {
+    if (R_TYPE_OPS.includes(opcode) && rd !== null && rs !== null && rt !== null) {
       instructions.push({
         index: instructionIndex,
         text: raw,
-        opcode,
+        instructionType: "R",
+        opcode: opcode as ParsedRType["opcode"],
         rd,
         rs,
         rt,
+      })
+      instructionIndex++
+    } else if (
+      I_TYPE_OPS.includes(opcode) &&
+      rt !== null &&
+      rs !== null &&
+      immediate !== null
+    ) {
+      instructions.push({
+        index: instructionIndex,
+        text: raw,
+        instructionType: "I",
+        opcode: opcode as ParsedIType["opcode"],
+        rt,
+        rs,
         immediate,
       })
       instructionIndex++
