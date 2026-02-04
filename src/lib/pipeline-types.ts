@@ -1,16 +1,21 @@
+/**
+ * Pipeline data shapes:
+ * - ParsedInstruction[] = the program (one source of truth; simulator and UI both use it).
+ * - StageSlot = what occupies a single pipeline stage: an instruction (plus stall/forwarding) or nop (empty or stall bubble).
+ * - PipelineStageData always has five StageSlots (no null); empty / bubble is represented by { type: "nop" }.
+ * - GridCellContent = display-only: what to draw in one (instruction, cycle) cell (stage or bubble).
+ */
+
 export type PipelineStage = "IF" | "ID/RF" | "EX" | "MEM" | "WB"
 
 export const STAGE_ORDER: PipelineStage[] = ["IF", "ID/RF", "EX", "MEM", "WB"]
 
-export interface PipelineInstruction {
-  text: string
-  index: number
-}
-
 export type RTypeOpcode = "add" | "addu" | "sub" | "subu"
 export type ITypeOpcode = "addi" | "addiu" | "lw" | "sw"
 
-export interface ParsedRType extends PipelineInstruction {
+export interface ParsedRType {
+  text: string
+  index: number
   instructionType: "R"
   opcode: RTypeOpcode
   rd: number
@@ -18,7 +23,9 @@ export interface ParsedRType extends PipelineInstruction {
   rt: number
 }
 
-export interface ParsedIType extends PipelineInstruction {
+export interface ParsedIType {
+  text: string
+  index: number
   instructionType: "I"
   opcode: ITypeOpcode
   rt: number
@@ -36,26 +43,43 @@ export interface ForwardSource {
 /** Map from register number to the source of the forwarded value */
 export type ForwardedFrom = Record<number, ForwardSource>
 
-export type StageContent =
+/** What can occupy a single pipeline stage slot: the instruction (plus stall/forwarding) or nop (empty or stall bubble). */
+export type StageSlot =
   | {
       type: "instruction"
-      index: number
+      instruction: ParsedInstruction
       stalled: boolean
       forwardedFrom?: ForwardedFrom
     }
-  | {
-      type: "bubble"
-      causedByStallOf?: number
-    }
+  | { type: "nop" }
 
-export interface PipelineStageData {
-  IF: StageContent | null
-  "ID/RF": StageContent | null
-  EX: StageContent | null
-  MEM: StageContent | null
-  WB: StageContent | null
+export function isInstructionSlot(
+  slot: StageSlot
+): slot is Extract<StageSlot, { type: "instruction" }> {
+  return slot.type === "instruction"
 }
 
+export function instructionSlot(
+  instruction: ParsedInstruction,
+  opts: { stalled: boolean; forwardedFrom?: ForwardedFrom }
+): Extract<StageSlot, { type: "instruction" }> {
+  return {
+    type: "instruction",
+    instruction,
+    stalled: opts.stalled,
+    forwardedFrom: opts.forwardedFrom,
+  }
+}
+
+export interface PipelineStageData {
+  IF: StageSlot
+  "ID/RF": StageSlot
+  EX: StageSlot
+  MEM: StageSlot
+  WB: StageSlot
+}
+
+/** Pipeline state at the end of cycle N. snapshots[i].cycle === i. */
 export interface CycleSnapshot extends PipelineStageData {
   cycle: number
 }

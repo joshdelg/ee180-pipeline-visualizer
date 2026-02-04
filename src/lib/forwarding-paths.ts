@@ -1,5 +1,5 @@
 import type { CycleSnapshot, PipelineStage } from "./pipeline-types"
-import { STAGE_ORDER } from "./pipeline-types"
+import { isInstructionSlot, STAGE_ORDER } from "./pipeline-types"
 
 export interface ForwardingPath {
   fromInstructionIndex: number
@@ -24,10 +24,10 @@ export function getForwardingPaths(
 
     for (const stage of STAGE_ORDER) {
       const content = snapshot[stage]
-      if (content?.type !== "instruction") continue
+      if (!isInstructionSlot(content)) continue
       if (!content.forwardedFrom) continue
 
-      const toInstructionIndex = content.index
+      const toInstructionIndex = content.instruction.index
 
       for (const [register, source] of Object.entries(content.forwardedFrom)) {
         paths.push({

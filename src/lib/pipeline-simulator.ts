@@ -2,20 +2,24 @@ import { getRegisterName } from "./mips-parser"
 import { getDataAvailableAfterStage, getDataRequiredStage, INSTRUCTION_INFO, type OptLevel } from "./pipeline-data-availability"
 import type {
   CycleSnapshot,
+  ForwardedFrom,
   ForwardSource,
   ParsedInstruction,
   PipelineStage,
   PipelineStageData,
+  StageSlot,
 } from "./pipeline-types"
-import { STAGE_ORDER } from "./pipeline-types"
+import { instructionSlot, isInstructionSlot, STAGE_ORDER } from "./pipeline-types"
+
+const NOP_SLOT: StageSlot = { type: "nop" }
 
 function createEmptyState(): PipelineStageData {
   return {
-    IF: null,
-    "ID/RF": null,
-    EX: null,
-    MEM: null,
-    WB: null,
+    IF: NOP_SLOT,
+    "ID/RF": NOP_SLOT,
+    EX: NOP_SLOT,
+    MEM: NOP_SLOT,
+    WB: NOP_SLOT,
   }
 }
 
@@ -42,46 +46,163 @@ function getRegisterWritten(inst: ParsedInstruction): number | null {
 }
 
 /**
- * For each register the consumer reads, finds the producer (if any) in the pipeline
- * downstream of the consumer. Returns a map: registerNumber -> ForwardSource.
- * At most one producer per register.
+ * For a fixed pipeline state, finds the producers (if any) for each register that the consumer reads.
+ * Returns a map: registerNumber -> ForwardSource. At most one producer per register.
  */
 function getRegisterDependencies(
   consumer: ParsedInstruction,
   consumerStage: PipelineStage,
-  nextState: PipelineStageData,
-  instructions: ParsedInstruction[],
+  pipelineState: PipelineStageData,
 ): Map<number, ForwardSource> {
   const deps = new Map<number, ForwardSource>()
   const readRegs = getRegistersRead(consumer)
+  
   if (readRegs.length === 0) {
     console.log(`[${consumer.index}] ${consumer.text} does not read any registers, so it does not have a dependency`)
     return deps
   }
 
   const consumerStageIndex = STAGE_ORDER.indexOf(consumerStage)
-  for (const stage of STAGE_ORDER.slice(consumerStageIndex + 1)) {
+  const stagesAfterConsumer = STAGE_ORDER.slice(consumerStageIndex + 1)
+
+  for (const stage of stagesAfterConsumer) {
     console.log(`[${consumer.index}] Searching for dependency in stage: ${stage}`)
-    const producerContent = nextState[stage]
-    if (producerContent?.type !== "instruction") {
+    
+    const producerSlot = pipelineState[stage]
+    if (!isInstructionSlot(producerSlot)) {
       console.log(`[${consumer.index}] Stage ${stage} is not an instruction, so it cannot be a dependency`)
       continue
     }
 
-    const producer = instructions[producerContent.index]
-    const writtenReg = getRegisterWritten(producer)
-    if (writtenReg === null) continue
-    if (!readRegs.includes(writtenReg)) continue
-    if (deps.has(writtenReg)) continue
+    const producerInstruction = producerSlot.instruction
+    const writtenReg = getRegisterWritten(producerInstruction)
+    
+    if (writtenReg === null || !readRegs.includes(writtenReg) || deps.has(writtenReg)) continue
 
-    console.log(`[${consumer.index}] Producer instruction [${producerContent.index}] ${producer.text} writes register: $${getRegisterName(writtenReg) ?? writtenReg}, which is read by [${consumer.index}] ${consumer.text}`)
+    console.log(`[${consumer.index}] Producer instruction [${producerInstruction.index}] ${producerInstruction.text} writes register: $${getRegisterName(writtenReg) ?? writtenReg}, which is read by [${consumer.index}] ${consumer.text}`)
     deps.set(writtenReg, {
-      instructionIndex: producerContent.index,
+      instructionIndex: producerInstruction.index,
       stage,
     })
   }
 
   return deps
+}
+
+/** WB→ID/RF forwarding: returns ForwardedFrom for producers in WB, or undefined if none. */
+function tryUseFastRF(
+  instruction: ParsedInstruction,
+  next: PipelineStageData
+): ForwardedFrom | undefined {
+  const deps = getRegisterDependencies(instruction, "ID/RF", next)
+  const fastRfFrom: ForwardedFrom = {}
+  for (const [reg, producer] of deps) {
+    if (producer.stage === "WB") fastRfFrom[reg] = producer
+  }
+  return Object.keys(fastRfFrom).length > 0 ? fastRfFrom : undefined
+}
+
+/** Returns ForwardedFrom if all deps can be forwarded, null if we must stall. */
+function tryForwardAll(
+  registerDeps: Map<number, ForwardSource>,
+  instructions: ParsedInstruction[],
+  optLevel: OptLevel
+): ForwardedFrom | null {
+  const forwardedFrom: ForwardedFrom = {}
+
+  for (const [reg, producer] of registerDeps) {
+    const producerInst = instructions[producer.instructionIndex]!
+    const dataAvailableAfterStage = getDataAvailableAfterStage(producerInst.opcode, optLevel)
+    
+    const producerHasDataReady =
+      STAGE_ORDER.indexOf(dataAvailableAfterStage) < STAGE_ORDER.indexOf(producer.stage)
+    
+    if (!producerHasDataReady) return null
+    forwardedFrom[reg] = producer
+  }
+
+  return forwardedFrom
+}
+
+type PromoteOutcome =
+  | { kind: "skip" }
+  | { kind: "stall"; instruction: ParsedInstruction }
+  | { kind: "advance"; instruction: ParsedInstruction; forwardedFrom?: ForwardedFrom }
+
+/** Returns whether or not the instruction can be promoted to the next stage depending on
+ * the data availability and forwarding logic.
+ */
+function getPromoteOutcome(
+  state: PipelineStageData,
+  next: PipelineStageData,
+  fromStage: PipelineStage,
+  toStage: PipelineStage,
+  instructions: ParsedInstruction[],
+  optLevel: OptLevel
+): PromoteOutcome {
+  // fromStage is empty, so there's nothing to promote.
+  const slot = state[fromStage]
+  if (!isInstructionSlot(slot)) return { kind: "skip" }
+
+  // There is already an instruction where we would promote to, so we must stall.
+  const instruction = slot.instruction
+  if (isInstructionSlot(next[toStage])) return { kind: "stall", instruction }
+
+  const dataRequiredStage = getDataRequiredStage(instruction.opcode, optLevel)
+  const stageDoesNotRequireData = dataRequiredStage !== toStage;
+  const shouldTryFastRF = toStage === "ID/RF";
+
+  // If the stage doesn't require register values, we:
+  // 1) See if we can use fast RF. We should always try this when possible (instead of waiting and trying to forward later).
+  // 2) Otherwise, just advance
+  if (stageDoesNotRequireData) {
+    if (shouldTryFastRF) {
+      const forwardedFrom = tryUseFastRF(instruction, next)
+      return { kind: "advance", instruction, forwardedFrom }
+    }
+
+    return { kind: "advance", instruction }
+  }
+
+  // If this instruction doesn't depend on any others in the current pipeline state, we can advance.
+  const registerDeps = getRegisterDependencies(instruction, toStage, next)
+  if (registerDeps.size === 0) return { kind: "advance", instruction }
+
+  // Otherwise, we need to see if we can forward all the dependencies.
+  const forwardedFrom = tryForwardAll(registerDeps, instructions, optLevel)
+  if (forwardedFrom !== null) return { kind: "advance", instruction, forwardedFrom }
+
+  // If we can't forward all the dependencies, we must stall.
+  return { kind: "stall", instruction }
+}
+
+/**
+ * Tries to promote the instruction in fromStage to toStage. Mutates next: either writes
+ * the instruction into toStage (advance) or leaves it in fromStage (stall).
+ */
+function tryPromoteInstruction(
+  state: PipelineStageData,
+  next: PipelineStageData,
+  fromStage: PipelineStage,
+  toStage: PipelineStage,
+  instructions: ParsedInstruction[],
+  optLevel: OptLevel
+): void {
+  const outcome = getPromoteOutcome(state, next, fromStage, toStage, instructions, optLevel)
+
+  switch (outcome.kind) {
+    case "skip":
+      return
+    case "stall":
+      next[fromStage] = instructionSlot(outcome.instruction, { stalled: true })
+      return
+    case "advance":
+      next[toStage] = instructionSlot(outcome.instruction, {
+        stalled: false,
+        forwardedFrom: outcome.forwardedFrom,
+      })
+      return
+  }
 }
 
 /**
@@ -102,169 +223,42 @@ export function simulate(
 
   let state = createEmptyState()
   let nextFetchIndex = 0
+  // `cycle` is the cycle number of `next` -- the pipeline we're assigning to
   let cycle = 0
 
   while (true) {
     const next = createEmptyState()
 
-    // Handle assigning to IF separately
     for (let stageIndex = STAGE_ORDER.length - 1; stageIndex > 0; stageIndex--) {
-      console.log(`Promoting from stage: ${STAGE_ORDER[stageIndex - 1]} to stage: ${STAGE_ORDER[stageIndex]}`)
-      
-      const promotingToStage = STAGE_ORDER[stageIndex];
-      const currentlyInStage = STAGE_ORDER[stageIndex - 1];
+      const toStage = STAGE_ORDER[stageIndex]
+      const fromStage = STAGE_ORDER[stageIndex - 1]
 
-      const currentStageContent = state[currentlyInStage];
-    
-      if (currentStageContent === null || currentStageContent.type !== "instruction") {
-        console.log(`No instruction previously at ${currentlyInStage}, so we cannot promote`)
-        continue
-      }
-
-      const currentInstructionIndex = currentStageContent.index
-      const currentInstruction = instructions[currentInstructionIndex]
-
-      const isNextPipelineStageFree = next[promotingToStage] === null;
-      if (!isNextPipelineStageFree) {
-        console.log(`Next pipeline stage ${promotingToStage} is not free, so we must stall`)
-        next[currentlyInStage] = {
-          type: "instruction",
-          index: currentInstructionIndex,
-          stalled: true,
-          forwardedFrom: undefined,
-        }
-        continue
-      }
-
-      // Check if instruction is going to enter a stage that requires data
-      const dataRequiredStage = getDataRequiredStage(
-        currentInstruction.opcode,
-        optLevel
-      )
-
-      const doesStageRequireData = dataRequiredStage === promotingToStage;
-      if (!doesStageRequireData) {
-        // When promoting to ID/RF, still record fast RF (WB→ID/RF) if we have a read dependency on an instruction in WB
-        let forwardedFrom: Record<number, ForwardSource> | undefined = undefined
-        if (promotingToStage === "ID/RF") {
-          const registerDeps = getRegisterDependencies(
-            currentInstruction,
-            "ID/RF",
-            next,
-            instructions,
-          )
-          const fastRfFrom: Record<number, ForwardSource> = {}
-          for (const [reg, producer] of registerDeps) {
-            if (producer.stage === "WB") {
-              fastRfFrom[reg] = producer
-            }
-          }
-          if (Object.keys(fastRfFrom).length > 0) {
-            forwardedFrom = fastRfFrom
-          }
-        }
-        next[promotingToStage] = {
-          type: "instruction",
-          index: currentInstructionIndex,
-          stalled: false,
-          forwardedFrom,
-        }
-        continue
-      }
-
-      console.log(`[${currentInstructionIndex}] ${currentInstruction.text} is going to enter data-requiring stage: ${promotingToStage}`)
-
-      const registerDeps = getRegisterDependencies(
-        currentInstruction,
-        promotingToStage,
-        next,
-        instructions,
-      )
-
-      if (registerDeps.size === 0) {
-        console.log(`[${currentInstructionIndex}] Since ${currentInstruction.text} does not have a dependency, we can advance`)
-        next[promotingToStage] = {
-          type: "instruction",
-          index: currentInstructionIndex,
-          stalled: false,
-          forwardedFrom: undefined,
-        }
-        continue
-      }
-
-      console.log(`[${currentInstructionIndex}] If promoted, ${currentInstruction.text} would depend on ${registerDeps.size} register(s): ${[...registerDeps.keys()].map((r) => `$${getRegisterName(r) ?? r}`).join(", ")}`)
-
-      // For each register with a dependency, check if we can forward
-      let canForwardAll = true
-      const forwardedFrom: Record<number, ForwardSource> = {}
-
-      for (const [reg, producer] of registerDeps) {
-        const producerInst = instructions[producer.instructionIndex]
-        const dataAvailableAfterStage = getDataAvailableAfterStage(
-          producerInst.opcode,
-          optLevel,
-        )
-        // Condition is <, because data is available AFTER `dataAvailableAfterStage` stage, so the instruction must be in a stage after this
-        const producerHasDataReady =
-          STAGE_ORDER.indexOf(dataAvailableAfterStage) <
-          STAGE_ORDER.indexOf(producer.stage)
-
-        if (producerHasDataReady) {
-          forwardedFrom[reg] = producer
-          console.log(`[${currentInstructionIndex}] Register $${getRegisterName(reg) ?? reg}: producer [${producer.instructionIndex}] ${producerInst.text} in ${producer.stage} has data ready (available after ${dataAvailableAfterStage})`)
-        } else {
-          console.log(`[${currentInstructionIndex}] Register $${getRegisterName(reg) ?? reg}: producer [${producer.instructionIndex}] ${producerInst.text} in ${producer.stage} does NOT have data ready (available after ${dataAvailableAfterStage})`)
-          canForwardAll = false
-          break
-        }
-      }
-
-      if (canForwardAll) {
-        console.log(`[${currentInstructionIndex}] Since all dependencies can be forwarded, we can advance ${currentInstruction.text} with forwarding`)
-        next[promotingToStage] = {
-          type: "instruction",
-          index: currentInstructionIndex,
-          stalled: false,
-          forwardedFrom: Object.keys(forwardedFrom).length > 0 ? forwardedFrom : undefined,
-        }
-        continue
-      }
-      
-      console.log(`[${currentInstructionIndex}] Since data would not be available in time, we must stall ${currentInstruction.text}`)
-      next[currentlyInStage] = {
-        type: "instruction",
-        index: currentInstructionIndex,
-        stalled: true,
-        forwardedFrom: undefined,
-      }
+      console.log(`Promoting from stage: ${fromStage} to stage: ${toStage}`)
+      tryPromoteInstruction(state, next, fromStage, toStage, instructions, optLevel)
     }
 
     // If IF stage is empty, then fetch a new instruction
-    if (next.IF === null && nextFetchIndex < count) {
-      next.IF = {
-        type: "instruction",
-        index: nextFetchIndex,
-        stalled: false,
-        forwardedFrom: undefined,
-      }
+    if (!isInstructionSlot(next.IF) && nextFetchIndex < count) {
+      next.IF = instructionSlot(instructions[nextFetchIndex]!, { stalled: false })
       nextFetchIndex++
     }
 
     state = next
-    cycle++
 
     snapshots.push({
-      cycle: cycle - 1,
+      cycle,
       ...state
     })
 
-    console.log(`cycle ${cycle - 1}:`, JSON.parse(JSON.stringify(state)))
+    console.log(`cycle ${cycle}:`, JSON.parse(JSON.stringify(state)))
 
-    const pipelineEmpty = STAGE_ORDER.every((s) => state[s] === null)
+    const pipelineEmpty = STAGE_ORDER.every((s) => !isInstructionSlot(state[s]))
     if (pipelineEmpty && nextFetchIndex >= count) {
       snapshots.pop()
       break
     }
+
+    cycle++
 
     if (cycle > 500) break
   }

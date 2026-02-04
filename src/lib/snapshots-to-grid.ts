@@ -1,5 +1,5 @@
 import type { CycleSnapshot, PipelineStage } from "./pipeline-types"
-import { STAGE_ORDER } from "./pipeline-types"
+import { isInstructionSlot, STAGE_ORDER } from "./pipeline-types"
 
 export type GridCellContent =
   | { type: "stage"; stage: PipelineStage }
@@ -22,7 +22,7 @@ export function getCellContent(
 
   for (const stage of STAGE_ORDER) {
     const content = snapshot[stage]
-    if (content?.type === "instruction" && content.index === instructionIndex) {
+    if (isInstructionSlot(content) && content.instruction.index === instructionIndex) {
       if (content.stalled) {
         return { type: "bubble" }
       }
@@ -46,7 +46,7 @@ export function getCellContentForStage(
   if (!snapshot) return null
 
   const content = snapshot[stage]
-  if (content?.type !== "instruction" || content.index !== instructionIndex)
+  if (!isInstructionSlot(content) || content.instruction.index !== instructionIndex)
     return null
 
   return content.stalled ? { type: "bubble" } : { type: "stage", stage }

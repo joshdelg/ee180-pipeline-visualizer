@@ -1,7 +1,7 @@
 import { useRef } from "react"
 import {
   type CycleSnapshot,
-  type PipelineInstruction,
+  type ParsedInstruction,
   type PipelineStage,
 } from "@/lib/pipeline-types"
 import { STAGE_ORDER } from "@/lib/pipeline-types"
@@ -159,7 +159,6 @@ function PipelineCell({
             FAST_RF_WB_RIGHT
           )}
         >
-          WB
         </div>
       </div>
     )
@@ -177,7 +176,7 @@ function PipelineCell({
             FAST_RF_IDRF_LEFT
           )}
         >
-          ID/RF
+          ID
         </div>
         <div
           id={getFastRfAnchorToId(instructionIndex, cycle)}
@@ -186,7 +185,7 @@ function PipelineCell({
             FAST_RF_IDRF_RIGHT
           )}
         >
-          ID/RF
+          RF
         </div>
       </div>
     )
@@ -219,7 +218,7 @@ function shouldShowPipelineRegister(
 }
 
 interface PipelineRowProps {
-  instruction: PipelineInstruction
+  instruction: ParsedInstruction
   snapshots: CycleSnapshot[]
   /** Cycles where this instruction is the WB producer in a WB→ID/RF path */
   fastRfProducerCycles: Set<number>
@@ -286,7 +285,7 @@ function PipelineRow({
 }
 
 interface PipelineGridProps {
-  instructions: PipelineInstruction[]
+  instructions: ParsedInstruction[]
   snapshots: CycleSnapshot[]
 }
 
