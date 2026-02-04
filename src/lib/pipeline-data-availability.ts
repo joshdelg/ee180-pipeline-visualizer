@@ -1,20 +1,8 @@
+import type { InstructionOpcode } from "./mips-opcodes"
 import type { PipelineStage } from "./pipeline-types"
 
-/**
- * Supported MIPS instruction opcodes.
- */
-export const INSTRUCTIONS = [
-  "add",
-  "addu",
-  "sub",
-  "subu",
-  "addi",
-  "addiu",
-  "lw",
-  "sw",
-] as const
-
-export type InstructionOpcode = (typeof INSTRUCTIONS)[number]
+export type { InstructionOpcode } from "./mips-opcodes"
+export { INSTRUCTIONS } from "./mips-opcodes"
 
 export type InstructionFormatType = "R" | "I"
 
@@ -56,6 +44,42 @@ export const INSTRUCTION_INFO: Record<InstructionOpcode, InstructionInfo> = {
     category: "arithmetic",
     writesToRegister: true,
   },
+  and: {
+    opcode: "and",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  or: {
+    opcode: "or",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  nor: {
+    opcode: "nor",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  xor: {
+    opcode: "xor",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  slt: {
+    opcode: "slt",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  sltu: {
+    opcode: "sltu",
+    instructionType: "R",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
   addi: {
     opcode: "addi",
     instructionType: "I",
@@ -64,6 +88,36 @@ export const INSTRUCTION_INFO: Record<InstructionOpcode, InstructionInfo> = {
   },
   addiu: {
     opcode: "addiu",
+    instructionType: "I",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  andi: {
+    opcode: "andi",
+    instructionType: "I",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  ori: {
+    opcode: "ori",
+    instructionType: "I",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  xori: {
+    opcode: "xori",
+    instructionType: "I",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  slti: {
+    opcode: "slti",
+    instructionType: "I",
+    category: "arithmetic",
+    writesToRegister: true,
+  },
+  sltiu: {
+    opcode: "sltiu",
     instructionType: "I",
     category: "arithmetic",
     writesToRegister: true,

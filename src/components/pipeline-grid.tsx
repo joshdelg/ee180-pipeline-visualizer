@@ -1,10 +1,11 @@
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import {
   type CycleSnapshot,
   type ParsedInstruction,
   type PipelineStage,
 } from "@/lib/pipeline-types"
 import { STAGE_ORDER } from "@/lib/pipeline-types"
+import type { ForwardingPath } from "@/lib/forwarding-paths"
 import {
   getForwardingPaths,
   getRegisterId,
@@ -12,6 +13,7 @@ import {
   getFastRfAnchorFromId,
   getFastRfAnchorToId,
 } from "@/lib/forwarding-paths"
+import { getRegisterName } from "@/lib/mips-parser"
 import { getCellContent } from "@/lib/snapshots-to-grid"
 import type { GridCellContent } from "@/lib/snapshots-to-grid"
 import { cn } from "@/lib/utils"
@@ -21,6 +23,26 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ForwardingPathsOverlay } from "@/components/forwarding-paths-overlay"
+
+/**
+ * Name of the pipeline register that has stageInFront in front of it and feeds stageBehind.
+ * Convention: the stage "in front of" a register is the one that writes to it (upstream).
+ */
+function pipelineRegisterName(stageInFront: PipelineStage, stageBehind: PipelineStage): string {
+  return `${stageInFront}/${stageBehind}`
+}
+
+function getPathDescription(path: ForwardingPath): string {
+  const reg = getRegisterName(path.register) ?? String(path.register)
+  if (isFastRfPath(path)) {
+    return `Fast RF: $${reg} from WB to ID/RF (cycle ${path.cycle}).`
+  }
+  const fromIdx = STAGE_ORDER.indexOf(path.fromStage)
+  const toIdx = STAGE_ORDER.indexOf(path.toStage)
+  const fromReg = pipelineRegisterName(STAGE_ORDER[fromIdx - 1], path.fromStage)
+  const toReg = pipelineRegisterName(STAGE_ORDER[toIdx - 1]!, path.toStage)
+  return `Forwarding: $${reg} from ${fromReg} → ${toReg} (cycle ${path.cycle}).`
+}
 
 const STAGE_COLORS: Record<PipelineStage, string> = {
   IF: "bg-blue-500/20 border-blue-500/40 dark:bg-blue-500/15",
@@ -217,6 +239,37 @@ function shouldShowPipelineRegister(
   return bothAreNonEmpty || bubbleOnLeftAndRightNonEmpty
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/** Renders instruction text with optional register name highlighted (glow) when it appears in the text. */
+function InstructionLabel({
+  text,
+  highlightRegisterText,
+}: {
+  text: string
+  highlightRegisterText: string | null
+}) {
+  if (!highlightRegisterText || !text.includes(highlightRegisterText)) {
+    return <>{text}</>
+  }
+  const parts = text.split(new RegExp(`(${escapeRegExp(highlightRegisterText)})`, "g"))
+  return (
+    <>
+      {parts.map((part, i) =>
+        part === highlightRegisterText ? (
+          <span key={i} className="register-glow text-foreground font-medium">
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </>
+  )
+}
+
 interface PipelineRowProps {
   instruction: ParsedInstruction
   snapshots: CycleSnapshot[]
@@ -224,6 +277,8 @@ interface PipelineRowProps {
   fastRfProducerCycles: Set<number>
   /** Cycles where this instruction is the ID/RF consumer in a WB→ID/RF path */
   fastRfConsumerCycles: Set<number>
+  /** When a forwarding path is hovered, the register name to highlight in this row (e.g. "$t0") */
+  highlightRegisterText?: string | null
 }
 
 function PipelineRow({
@@ -231,13 +286,20 @@ function PipelineRow({
   snapshots,
   fastRfProducerCycles,
   fastRfConsumerCycles,
+  highlightRegisterText = null,
 }: PipelineRowProps) {
   const cycleCount = snapshots.length
 
   return (
     <div className="flex items-center gap-2">
-      <div className="w-28 shrink-0 truncate text-xs font-mono text-muted-foreground">
-        {instruction.text}
+      <div
+        className="w-32 shrink-0 whitespace-nowrap text-xs font-mono text-muted-foreground"
+        title={instruction.text}
+      >
+        <InstructionLabel
+          text={instruction.text}
+          highlightRegisterText={highlightRegisterText ?? null}
+        />
       </div>
       <div className="flex flex-1 items-stretch gap-0.5">
         {Array.from({ length: cycleCount }, (_, cycle) => {
@@ -293,6 +355,7 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
   const cycleCount = snapshots.length
   const forwardingPaths = getForwardingPaths(snapshots)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [hoveredPath, setHoveredPath] = useState<ForwardingPath | null>(null)
 
   const fastRfPaths = forwardingPaths.filter(isFastRfPath)
   const fastRfProducerByInstruction = new Map<number, Set<number>>()
@@ -319,10 +382,23 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
       <ForwardingPathsOverlay
         paths={forwardingPaths}
         scrollContainerRef={scrollContainerRef}
+        onHoveredPathChange={setHoveredPath}
       />
+
+      {/* Top bar: hovered path or placeholder */}
+      <div className="sticky top-0 z-10 shrink-0 border-b border-border py-2 text-sm text-muted-foreground">
+        {hoveredPath ? (
+          <span className="text-foreground font-medium">
+            {getPathDescription(hoveredPath)}
+          </span>
+        ) : (
+          "Highlight a forwarding arrow to display the forwarding path."
+        )}
+      </div>
+
       {/* Axis labels */}
       <div className="flex items-start gap-2">
-        <div className="flex w-28 shrink-0 items-center justify-center pt-6">
+        <div className="flex w-32 shrink-0 items-center justify-center pt-6">
           <span className="text-muted-foreground text-xs font-medium">
             Instr. Order
           </span>
@@ -351,19 +427,30 @@ export function PipelineGrid({ instructions, snapshots }: PipelineGridProps) {
 
       {/* Grid rows */}
       <div className="flex flex-col gap-4">
-        {instructions.map((instruction) => (
-          <PipelineRow
-            key={instruction.index}
-            instruction={instruction}
-            snapshots={snapshots}
-            fastRfProducerCycles={
-              fastRfProducerByInstruction.get(instruction.index) ?? new Set()
-            }
-            fastRfConsumerCycles={
-              fastRfConsumerByInstruction.get(instruction.index) ?? new Set()
-            }
-          />
-        ))}
+        {instructions.map((instruction) => {
+          const isInHoveredPath =
+            hoveredPath &&
+            (instruction.index === hoveredPath.fromInstructionIndex ||
+              instruction.index === hoveredPath.toInstructionIndex)
+          const highlightRegisterText =
+            isInHoveredPath && hoveredPath
+              ? `$${getRegisterName(hoveredPath.register) ?? hoveredPath.register}`
+              : null
+          return (
+            <PipelineRow
+              key={instruction.index}
+              instruction={instruction}
+              snapshots={snapshots}
+              fastRfProducerCycles={
+                fastRfProducerByInstruction.get(instruction.index) ?? new Set()
+              }
+              fastRfConsumerCycles={
+                fastRfConsumerByInstruction.get(instruction.index) ?? new Set()
+              }
+              highlightRegisterText={highlightRegisterText}
+            />
+          )
+        })}
       </div>
     </div>
   )

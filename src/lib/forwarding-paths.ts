@@ -1,6 +1,10 @@
 import type { CycleSnapshot, PipelineStage } from "./pipeline-types"
 import { isInstructionSlot, STAGE_ORDER } from "./pipeline-types"
 
+/**
+ * A path from a producer instruction to a consumer in the same cycle (forwarding).
+ * fromStage / toStage refer to the stage *in front of* the pipeline register that actually forwards/receives the value:
+ */
 export interface ForwardingPath {
   fromInstructionIndex: number
   toInstructionIndex: number

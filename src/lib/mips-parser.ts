@@ -1,3 +1,4 @@
+import { I_TYPE_OPCODES, R_TYPE_OPCODES } from "./mips-opcodes"
 import type {
   ParsedInstruction,
   ParsedIType,
@@ -75,9 +76,6 @@ function parseImmediate(s: string): number | null {
   return isNaN(n) ? null : n
 }
 
-const R_TYPE_OPS = ["add", "addu", "sub", "subu"]
-const I_TYPE_OPS = ["addi", "addiu", "lw", "sw"]
-
 /** Strips comment and trims. Returns null if line is empty or comment-only. */
 function stripLine(line: string): string | null {
   const commentIdx = line.indexOf("#")
@@ -87,7 +85,8 @@ function stripLine(line: string): string | null {
 
 /**
  * Parses MIPS assembly source into ParsedInstruction[].
- * Supports: add, addu, sub, subu, addi, addiu, lw, sw.
+ * Supports: R-type (add, addu, sub, subu, and, or, nor, xor, slt, sltu);
+ * I-type arithmetic (addi, addiu, andi, ori, xori, slti, sltiu); lw, sw.
  */
 export function parse(source: string): ParseResult {
   const errors: ParseError[] = []
@@ -127,7 +126,7 @@ export function parse(source: string): ParseResult {
     let rt: number | null = null
     let immediate: number | null = null
 
-    if (R_TYPE_OPS.includes(opcode)) {
+    if ((R_TYPE_OPCODES as readonly string[]).includes(opcode)) {
       // add $d, $s, $t
       if (operands.length !== 3) {
         err(`Expected 3 operands for ${opcode}`)
@@ -139,7 +138,7 @@ export function parse(source: string): ParseResult {
         if (rs === null) err(`Invalid source register: ${operands[1]}`)
         if (rt === null) err(`Invalid source register: ${operands[2]}`)
       }
-    } else if (I_TYPE_OPS.includes(opcode)) {
+    } else if ((I_TYPE_OPCODES as readonly string[]).includes(opcode)) {
       if (operands.length === 3) {
         // addi $t, $s, imm
         rt = parseRegister(operands[0])
@@ -179,7 +178,7 @@ export function parse(source: string): ParseResult {
       continue
     }
 
-    if (R_TYPE_OPS.includes(opcode) && rd !== null && rs !== null && rt !== null) {
+    if ((R_TYPE_OPCODES as readonly string[]).includes(opcode) && rd !== null && rs !== null && rt !== null) {
       instructions.push({
         index: instructionIndex,
         text: raw,
@@ -191,7 +190,7 @@ export function parse(source: string): ParseResult {
       })
       instructionIndex++
     } else if (
-      I_TYPE_OPS.includes(opcode) &&
+      (I_TYPE_OPCODES as readonly string[]).includes(opcode) &&
       rt !== null &&
       rs !== null &&
       immediate !== null

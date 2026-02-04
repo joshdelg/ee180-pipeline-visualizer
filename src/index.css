@@ -121,3 +121,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Glow for forwarded register name in instruction order column when path is hovered */
+.register-glow {
+  text-shadow: 0 0 8px #16a34a, 0 0 4px #16a34a;
+}

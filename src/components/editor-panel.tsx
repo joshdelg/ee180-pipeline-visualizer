@@ -13,16 +13,16 @@ export function EditorPanel({
   placeholder = "Enter MIPS assembly instructions...",
 }: EditorPanelProps) {
   return (
-    <Card className="flex h-full flex-col overflow-hidden">
-      <CardHeader className="flex-shrink-0 border-b px-4 py-3">
+    <Card className="flex h-full flex-col gap-0 overflow-hidden py-0">
+      <CardHeader className="flex-shrink-0 border-b px-4 !pb-2 pt-3">
         <CardTitle className="text-base font-medium">MIPS Assembly</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
+      <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <Textarea
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           placeholder={placeholder}
-          className="min-h-full resize-none rounded-none border-0 focus-visible:ring-0"
+          className="min-h-0 flex-1 resize-none rounded-none border-0 border-l-2 border-border bg-muted/40 font-mono text-sm [field-sizing:normal] [tab-size:4] focus-visible:ring-0 dark:bg-muted/20"
         />
       </CardContent>
     </Card>

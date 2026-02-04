@@ -6,12 +6,13 @@
  * - GridCellContent = display-only: what to draw in one (instruction, cycle) cell (stage or bubble).
  */
 
+import type { ITypeOpcode, RTypeOpcode } from "./mips-opcodes"
+
+export type { ITypeOpcode, RTypeOpcode }
+
 export type PipelineStage = "IF" | "ID/RF" | "EX" | "MEM" | "WB"
 
 export const STAGE_ORDER: PipelineStage[] = ["IF", "ID/RF", "EX", "MEM", "WB"]
-
-export type RTypeOpcode = "add" | "addu" | "sub" | "subu"
-export type ITypeOpcode = "addi" | "addiu" | "lw" | "sw"
 
 export interface ParsedRType {
   text: string
@@ -35,6 +36,9 @@ export interface ParsedIType {
 
 export type ParsedInstruction = ParsedRType | ParsedIType
 
+/**
+ * `stage` is the stage *in front of* the pipeline register that forwards to the consumer.
+ */
 export interface ForwardSource {
   instructionIndex: number
   stage: PipelineStage
